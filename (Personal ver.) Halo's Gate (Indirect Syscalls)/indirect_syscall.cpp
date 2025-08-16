@@ -76,25 +76,32 @@ DWORD getInDirectSyscallStub(HMODULE hNTDLL, const char* NtFunctionName){
     BYTE* NtFunctionAddr = (BYTE*)MyGetProcAddress(hNTDLL, NtFunctionName);
 
     if (!NtFunctionAddr) return SSN;
-    printf("[+] Function %s at %p\n", NtFunctionName, NtFunctionAddr);
     if (NtFunctionAddr[0] == 0x4C && NtFunctionAddr[1] == 0x8B && NtFunctionAddr[2] == 0xD1 && NtFunctionAddr[3] == 0xB8) {
-        SSN  = *(DWORD*)((BYTE*)NtFunctionAddr + 4);
+        printf("[+] Function %s at %p\n", NtFunctionName, NtFunctionAddr);
+        SSN = *(DWORD*)((BYTE*)NtFunctionAddr + 4);
 
-        // Cas 1 : stub normal => on trouve "syscall" (0x0F 0x05)
+        // stub normal => on trouve "syscall" (0x0F 0x05)
         if (NtFunctionAddr[0x12] == 0x0F && NtFunctionAddr[0x13] == 0x05) {
             stub = NtFunctionAddr; // direct vers le syscall
             printf("\t[*] Found syscall [0F 05] !\n");
+        } else {
+            printf("[*] %s may be hooked by a security!\n", NtFunctionName);
+            printf("[*] Let's do a magic trick!\n");
+            BYTE* looker = NtFunctionAddr;
+            for (int _ = 0; _ < 0x500; _++) {
+                looker++;
+                if (looker[0] == 0x4C && looker[1] == 0x8B && looker[2] == 0xD1 && looker[3] == 0xB8) {
+                    //stub normal => on trouve "syscall" (0x0F 0x05)
+                    if (looker[0x12] == 0x0F && looker[0x13] == 0x05) {
+                        stub = looker; // direct vers le syscall
+                        printf("\t[*] Found unhooked syscall [0F 05] !\n");
+                        break;
+                    }
+                }
+            } 
         }
-        // Cas 2 : trampoline => on trouve "jmp qword ptr [rip+imm32]" = FF 25 ?? ?? ?? ??
-        else if (NtFunctionAddr[0x12] == 0xFF && NtFunctionAddr[0x13] == 0x25) {
-            INT32 ripOffset = *(INT32*)(NtFunctionAddr + 14); // imm32
-            LPVOID jmpAddr = (LPVOID)(NtFunctionAddr + 17 + ripOffset);
-            stub = *(LPVOID*)jmpAddr;
-            printf("\t[*] Found trampoline [FF 25] getting jump offset !\n");
-        }
-    } else {
+    } else { 
         printf("[-] Unexpected stub format!\n");
-        printf("[-] %s may be hooked by a security!\n", NtFunctionName);
         return SSN;
     }
 
