@@ -124,30 +124,10 @@ typedef struct _PS_ATTRIBUTE_LIST
     PS_ATTRIBUTE Attributes[1];
 } PS_ATTRIBUTE_LIST, *PPS_ATTRIBUTE_LIST;
 
-extern "C" {
-    NTSTATUS NTAPI RtlCreateProcessParametersEx(
-        PRTL_USER_PROCESS_PARAMETERS *pProcessParameters,
-        PUNICODE_STRING ImagePathName,
-        PUNICODE_STRING DllPath,
-        PUNICODE_STRING CurrentDirectory,
-        PUNICODE_STRING CommandLine,
-        PVOID Environment,
-        PUNICODE_STRING WindowTitle,
-        PUNICODE_STRING DesktopInfo,
-        PUNICODE_STRING ShellInfo,
-        PUNICODE_STRING RuntimeData,
-        ULONG Flags
-    );
-
-    VOID NTAPI RtlDestroyProcessParameters(
-        PRTL_USER_PROCESS_PARAMETERS ProcessParameters
-    );
-
-    VOID NTAPI RtlInitUnicodeString(
+extern "C" VOID NTAPI RtlInitUnicodeString(
         PUNICODE_STRING DestinationString,
         PCWSTR SourceString
     );
-}
 
 
 //=============== stub definitions ================
