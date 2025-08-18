@@ -1,15 +1,12 @@
 #pragma once 
 #include <windows.h>
 #include <ntdef.h>
-#include <winternl.h>
 
-typedef _Function_class_(PS_APC_ROUTINE)
-VOID NTAPI PS_APC_ROUTINE(
-    _In_opt_ PVOID ApcArgument1,
-    _In_opt_ PVOID ApcArgument2,
-    _In_opt_ PVOID ApcArgument3
-    );
-typedef PS_APC_ROUTINE* PPS_APC_ROUTINE;
+typedef VOID (NTAPI *PS_APC_ROUTINE)(
+    PVOID ApcArgument1,
+    PVOID ApcArgument2,
+    PVOID ApcArgument3
+);
 
 typedef struct _SYSCALL_STUB {
     DWORD SyscallId;
@@ -141,11 +138,11 @@ extern "C" NTSTATUS stubNtWriteVirtualMemory(HANDLE ProcessHandle, PVOID BaseAdd
 
 DWORD g_SSN_NtProtectVirtualMemory      = 0;
 LPVOID g_SYSADDR_NtProtectVirtualMemory = 0;
-extern "C" NTSTATUS stubNtProtectVirtualMemory(_In_ HANDLE ProcessHandle, _Inout_ PVOID *BaseAddress, _Inout_ PSIZE_T RegionSize, _In_ ULONG NewProtection, _Out_ PULONG OldProtection);
+extern "C" NTSTATUS stubNtProtectVirtualMemory(HANDLE ProcessHandle, PVOID *BaseAddress, PSIZE_T RegionSize, ULONG NewProtection, PULONG OldProtection);
 
 DWORD g_SSN_NtResumeThread      = 0;
 LPVOID g_SYSADDR_NtResumeThread = 0;
-extern "C" NTSTATUS stubNtResumeThread(_In_ HANDLE ThreadHandle, _Out_opt_ PULONG PreviousSuspendCount);
+extern "C" NTSTATUS stubNtResumeThread( HANDLE ThreadHandle, PULONG PreviousSuspendCount);
 
 DWORD g_SSN_NtWaitForSingleObject       = 0;
 LPVOID g_SYSADDR_NtWaitForSingleObject  = 0;
