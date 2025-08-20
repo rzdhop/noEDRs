@@ -150,5 +150,5 @@ extern "C" NTSTATUS stubNtWaitForSingleObject(HANDLE Handle, BOOLEAN Alertable, 
 
 DWORD g_SSN_NtQueueApcThread    = 0;
 LPVOID g_SYSADDR_NtQueueApcThread       = 0;
-extern "C" NTSTATUS stubNtQueueApcThread(HANDLE ThreadHandle, PPS_APC_ROUTINE ApcRoutine, PVOID ApcArgument1, PVOID ApcArgument2, PVOID ApcArgument3);
+extern "C" NTSTATUS stubNtQueueApcThread(HANDLE ThreadHandle, LPVOID ApcRoutine, PVOID ApcArgument1, PVOID ApcArgument2, PVOID ApcArgument3);
 //=================================================
